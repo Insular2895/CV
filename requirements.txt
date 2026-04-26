@@ -3,3 +3,6 @@ openpyxl
 python-docx
 python-dotenv
 rapidfuzz
+gspread
+google-auth
+python-dotenv

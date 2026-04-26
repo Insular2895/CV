@@ -36,3 +36,10 @@ src/_broken_20260426/
 # Divers
 *.log
 *.tmp
+
+.env
+credentials/
+data/output/
+__pycache__/
+*.pyc
+.DS_Store
