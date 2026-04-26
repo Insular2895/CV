@@ -1,5 +1,6 @@
 from pathlib import Path
 from datetime import datetime
+import json
 import re
 import unicodedata
 
@@ -46,8 +47,11 @@ def safe_str(value):
     if value is None:
         return ""
 
-    if pd.isna(value):
-        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except Exception:
+        pass
 
     text = str(value).strip()
 
@@ -61,10 +65,10 @@ def get_value(row, possible_columns, default=""):
     if row is None:
         return default
 
-    index_lower = {str(col).lower(): col for col in row.index}
+    index_lower = {str(col).lower().strip(): col for col in row.index}
 
     for col in possible_columns:
-        actual = index_lower.get(col.lower())
+        actual = index_lower.get(col.lower().strip())
         if actual is not None:
             value = safe_str(row[actual])
             if value:
@@ -96,12 +100,15 @@ def format_year_or_date(value):
     if not value:
         return ""
 
-    # Plage d'années "2023-2026" → "2023 - 2026"
-    range_match = re.match(r"^(20\d{2}|19\d{2})\s*[-–]\s*(20\d{2}|19\d{2})$", value.strip())
+    # 2023-2026 / 2023 – 2026
+    range_match = re.match(
+        r"^(20\d{2}|19\d{2})\s*[-–]\s*(20\d{2}|19\d{2})$",
+        value.strip(),
+    )
     if range_match:
         return f"{range_match.group(1)} - {range_match.group(2)}"
 
-    # Datetime Excel: pd.Timestamp ou string longue
+    # 2026-04-07 00:00:00 -> 2026
     try:
         parsed = pd.to_datetime(value, errors="coerce")
         if not pd.isna(parsed):
@@ -109,7 +116,6 @@ def format_year_or_date(value):
     except Exception:
         pass
 
-    # Cas "2026-04-07 00:00:00"
     match = re.search(r"(20\d{2}|19\d{2})", value)
     if match and len(value) > 10 and "-" in value:
         return match.group(1)
@@ -118,9 +124,6 @@ def format_year_or_date(value):
 
 
 def clean_dash_join(*parts):
-    """
-    Joint proprement les éléments sans créer de tirets vides.
-    """
     cleaned = [safe_str(p) for p in parts if safe_str(p)]
 
     if not cleaned:
@@ -130,9 +133,6 @@ def clean_dash_join(*parts):
 
 
 def split_multi_value(text):
-    """
-    Split tags / skills avec séparateurs fréquents.
-    """
     text = safe_str(text)
 
     if not text:
@@ -154,9 +154,6 @@ def load_job_description():
 
 
 def get_sheet_case_insensitive(excel_file, wanted_name):
-    """
-    Récupère une feuille Excel même si elle est écrite Leadership au lieu de leadership.
-    """
     sheet_map = {s.lower().strip(): s for s in excel_file.sheet_names}
     key = wanted_name.lower().strip()
 
@@ -185,7 +182,7 @@ def load_master_profile():
 
 
 # ============================================================
-# JOB PARSER SIMPLE ET ROBUSTE
+# JOB PARSER SIMPLE
 # ============================================================
 
 def extract_company(job_text):
@@ -199,33 +196,38 @@ def extract_company(job_text):
         r"organization\s*[:\-]\s*(.+)",
     ]
 
-    for line in lines[:25]:
+    for line in lines[:30]:
         for pattern in labeled_patterns:
             match = re.search(pattern, line, flags=re.IGNORECASE)
             if match:
                 company = match.group(1).strip()
-                if len(company) <= 50:
+                if 2 <= len(company) <= 60:
                     return company
 
-    # Cherche "Join <Company>", "at <Company>", "Why Join <Company>"
     context_patterns = [
         r"(?:why\s+)?join\s+([A-Z][A-Za-z0-9\-&]+)",
         r"join\s+the\s+([A-Z][A-Za-z0-9\-&]+)\s+team",
-        r"([A-Z][A-Za-z0-9\-&]{2,})\s+is\s+(?:looking|seeking|hiring|searching|a\b)",
+        r"([A-Z][A-Za-z0-9\-&]{2,})\s+is\s+(?:looking|seeking|hiring|searching)",
         r"([A-Z][A-Za-z0-9\-&]{2,})\s+recherche",
-        r"(?:from\s+various|at)\s+([A-Z][A-Za-z0-9\-&]{2,})\b",
+        r"at\s+([A-Z][A-Za-z0-9\-&]{2,})\b",
     ]
 
-    _stop = {"the", "our", "this", "your", "a", "an", "we", "team", "role", "position",
-             "company", "organization", "groupe", "group", "france", "paris"}
+    stop = {
+        "the", "our", "this", "your", "team", "role", "position",
+        "company", "organization", "groupe", "group", "france", "paris",
+    }
 
-    for line in lines[:60]:
+    for line in lines[:80]:
         for pattern in context_patterns:
-            match = re.search(pattern, line, re.IGNORECASE)
+            match = re.search(pattern, line)
             if match:
                 candidate = match.group(1).strip()
-                if candidate.lower() not in _stop and 2 <= len(candidate) <= 40:
+                if candidate.lower() not in stop and 2 <= len(candidate) <= 40:
                     return candidate
+
+    # Cas Ipsen si le nom est présent dans le texte sans structure claire
+    if "ipsen" in normalize_text(job_text):
+        return "Ipsen"
 
     return "Entreprise"
 
@@ -254,15 +256,17 @@ def looks_like_real_job_title(line):
         "what you will do",
         "profile required",
         "candidate profile",
+        "overview",
+        "lorsque",
     ]
 
     if any(fragment in lowered for fragment in bad_fragments):
         return False
 
-    if len(line_clean) > 70:
+    if len(line_clean) > 75:
         return False
 
-    if len(line_clean.split()) > 9:
+    if len(line_clean.split()) > 10:
         return False
 
     title_keywords = [
@@ -278,12 +282,15 @@ def looks_like_real_job_title(line):
         "responsable",
         "acheteur",
         "commercial",
+        "adv",
         "supply",
         "operations",
         "logistics",
         "procurement",
         "data",
         "business",
+        "import",
+        "export",
     ]
 
     return any(keyword in lowered for keyword in title_keywords)
@@ -300,23 +307,19 @@ def extract_job_title(job_text):
         r"position\s*[:\-]\s*(.+)",
     ]
 
-    for line in lines[:40]:
+    for line in lines[:50]:
         for pattern in patterns:
             match = re.search(pattern, line, flags=re.IGNORECASE)
             if match:
                 title = match.group(1).strip()
+                title = re.sub(r"\s*\([^)]*\)", "", title).strip()
                 if looks_like_real_job_title(title):
                     return title
 
-    # Essai avec nettoyage des parenthèses "(CDD / 1 an / ...)"
-    for line in lines[:20]:
+    for line in lines[:25]:
         cleaned = re.sub(r"\s*\([^)]*\)", "", line).strip()
-        if cleaned and looks_like_real_job_title(cleaned):
+        if looks_like_real_job_title(cleaned):
             return cleaned
-
-    for line in lines[:20]:
-        if looks_like_real_job_title(line):
-            return line
 
     return "Poste cible"
 
@@ -329,28 +332,27 @@ def extract_keywords(job_text):
         "will", "dans", "avec", "pour", "sur", "les", "des", "une", "est", "nous",
         "vous", "vos", "aux", "du", "de", "la", "le", "un", "en", "et", "au",
         "as", "to", "of", "in", "a", "an", "is", "be", "or", "by", "from",
+        "role", "poste", "description", "position", "year", "term", "contract",
     }
 
     words = re.findall(r"[a-z0-9+#.]+", text)
     words = [w for w in words if len(w) >= 3 and w not in stopwords]
 
     frequency = {}
+
     for word in words:
         frequency[word] = frequency.get(word, 0) + 1
 
     sorted_words = sorted(frequency.items(), key=lambda x: x[1], reverse=True)
+
     return [w for w, _ in sorted_words[:80]]
 
 
 def parse_job(job_text):
-    title = extract_job_title(job_text)
-    company = extract_company(job_text)
-    keywords = extract_keywords(job_text)
-
     return {
-        "company": company,
-        "job_title": title,
-        "keywords": keywords,
+        "company": extract_company(job_text),
+        "job_title": extract_job_title(job_text),
+        "keywords": extract_keywords(job_text),
         "raw_text": job_text,
         "normalized_text": normalize_text(job_text),
     }
@@ -363,6 +365,10 @@ def parse_job(job_text):
 def row_search_text(row):
     columns = [
         "company",
+        "organisation",
+        "organization",
+        "role",
+        "position_title",
         "job_title",
         "industry_tags",
         "job_family_tags",
@@ -371,6 +377,7 @@ def row_search_text(row):
         "skills_transferable",
         "skills_exposed",
         "kpis_verified",
+        "notes",
     ]
 
     values = []
@@ -379,18 +386,39 @@ def row_search_text(row):
         if col in row.index:
             values.append(safe_str(row[col]))
 
-    for i in range(1, 6):
-        col = f"truth_bullet_{i}"
-        if col in row.index:
-            values.append(safe_str(row[col]))
+    for i in range(1, 8):
+        for col in [f"truth_bullet_{i}", f"bullet_{i}"]:
+            if col in row.index:
+                values.append(safe_str(row[col]))
 
     return normalize_text(" ".join(values))
+
+
+def get_row_year(row):
+    raw = get_value(
+        row,
+        ["date_end", "end_year", "year", "date", "dates", "date_range"],
+        "",
+    )
+
+    years = re.findall(r"(20\d{2}|19\d{2})", safe_str(raw))
+
+    if years:
+        return max(int(y) for y in years)
+
+    start = get_value(row, ["date_start", "start_year"], "")
+    end = get_value(row, ["date_end", "end_year"], "")
+    years = re.findall(r"(20\d{2}|19\d{2})", f"{start} {end}")
+
+    if years:
+        return max(int(y) for y in years)
+
+    return 0
 
 
 def score_row(row, parsed_job):
     job_text = parsed_job["normalized_text"]
     keywords = parsed_job["keywords"]
-
     searchable = row_search_text(row)
 
     if not searchable:
@@ -402,27 +430,28 @@ def score_row(row, parsed_job):
         if keyword in searchable:
             score += 3
 
-    # Boosts métiers importants
     boosts = {
-        "supply": 12,
-        "chain": 8,
-        "logistics": 10,
-        "warehouse": 10,
-        "transport": 8,
-        "procurement": 10,
-        "purchasing": 8,
+        "adv": 20,
+        "import": 18,
+        "export": 18,
+        "international": 14,
+        "supply": 16,
+        "chain": 12,
+        "logistics": 16,
+        "warehouse": 14,
+        "transport": 12,
+        "procurement": 12,
+        "purchasing": 10,
         "achats": 10,
-        "operations": 8,
-        "sap": 10,
-        "ewm": 10,
-        "stock": 8,
-        "inventory": 8,
-        "export": 8,
-        "import": 8,
-        "incoterms": 8,
-        "forecast": 7,
-        "data": 7,
-        "analytics": 7,
+        "operations": 14,
+        "sap": 16,
+        "ewm": 12,
+        "stock": 12,
+        "inventory": 12,
+        "incoterms": 14,
+        "forecast": 8,
+        "data": 8,
+        "analytics": 8,
         "finance": 7,
         "risk": 7,
         "media": 6,
@@ -433,33 +462,24 @@ def score_row(row, parsed_job):
         if word in job_text and word in searchable:
             score += weight
 
-    # Récence
-    date_end = get_value(row, ["date_end", "end_year", "year", "date", "dates"])
-    year_match = re.search(r"(20\d{2}|19\d{2})", safe_str(date_end))
+    # Blurry est plus professionnel et plus proche ADV / opérations cross-border.
+    company = normalize_text(get_value(row, ["company", "organisation", "organization"], ""))
 
-    if year_match:
-        year = int(year_match.group(1))
+    if company == "blurry":
+        if any(w in job_text for w in ["adv", "import", "export", "logistics", "supply", "operations", "international"]):
+            score += 35
+
+    if company == "minero":
+        if any(w in job_text for w in ["procurement", "purchasing", "achats", "sourcing"]):
+            score += 25
+        if any(w in job_text for w in ["adv", "customer service", "service client"]):
+            score -= 10
+
+    year = get_row_year(row)
+    if year:
         score += max(0, year - 2020)
 
     return score
-
-
-def sort_by_recency(df):
-    if df.empty:
-        return df
-
-    def extract_year(row):
-        raw = get_value(row, ["date_end", "end_year", "year", "date", "dates"], "")
-        years = re.findall(r"(20\d{2}|19\d{2})", safe_str(raw))
-
-        if years:
-            return max(int(y) for y in years)
-
-        return 0
-
-    df = df.copy()
-    df["_sort_year"] = df.apply(extract_year, axis=1)
-    return df.sort_values(by=["_score", "_sort_year"], ascending=[False, False])
 
 
 def select_top_rows(df, parsed_job, max_rows):
@@ -468,7 +488,9 @@ def select_top_rows(df, parsed_job, max_rows):
 
     df = df.copy()
     df["_score"] = df.apply(lambda row: score_row(row, parsed_job), axis=1)
-    df = sort_by_recency(df)
+    df["_sort_year"] = df.apply(get_row_year, axis=1)
+
+    df = df.sort_values(by=["_score", "_sort_year"], ascending=[False, False])
 
     selected = df.head(max_rows)
 
@@ -487,7 +509,6 @@ def split_bullets(raw_value, max_bullets=4):
 
     text = text.replace("\r", "\n")
 
-    # Cas où Excel contient de vraies lignes
     if "\n" in text:
         parts = text.split("\n")
     elif "•" in text:
@@ -514,24 +535,26 @@ def split_bullets(raw_value, max_bullets=4):
 
 
 def extract_truth_bullets(row, max_bullets=4):
-    # Priorité aux colonnes numérotées truth_bullet_1, truth_bullet_2, ...
     bullets = []
+
     for i in range(1, 8):
         value = get_value(row, [f"truth_bullet_{i}", f"bullet_{i}"], "")
+
         if value and len(value) > 5:
             bullets.append(value)
+
         if len(bullets) >= max_bullets:
             break
 
     if bullets:
         return bullets
 
-    # Fallback colonne texte unique
     raw = get_value(
         row,
         ["truth_bullets", "bullets", "description", "evidence", "allowed"],
         "",
     )
+
     return split_bullets(raw, max_bullets=max_bullets)
 
 
@@ -543,11 +566,173 @@ def select_certifications(df, parsed_job, max_certs=2):
     if df.empty:
         return []
 
+    job_text = parsed_job["normalized_text"]
+
+    def cert_score(row):
+        base = score_row(row, parsed_job)
+
+        cert_name = normalize_text(
+            get_value(
+                row,
+                [
+                    "certification_name",
+                    "certification",
+                    "cert_name",
+                    "name",
+                    "title",
+                    "skill_name",
+                ],
+                "",
+            )
+        )
+
+        issuer = normalize_text(
+            get_value(
+                row,
+                [
+                    "issuer",
+                    "organization",
+                    "organisation",
+                    "company",
+                    "provider",
+                    "school",
+                    "entreprise",
+                ],
+                "",
+            )
+        )
+
+        combined = f"{cert_name} {issuer}"
+
+        supply_context = any(
+            w in job_text
+            for w in [
+                "adv",
+                "import",
+                "export",
+                "logistics",
+                "warehouse",
+                "transport",
+                "supply",
+                "procurement",
+                "delivery",
+                "trade",
+                "sap",
+                "inventory",
+                "stock",
+                "slas",
+            ]
+        )
+
+        data_context = any(
+            w in job_text
+            for w in [
+                "data",
+                "analytics",
+                "dashboard",
+                "forecast",
+                "forecasting",
+                "sql",
+                "python",
+                "bi",
+                "kpi",
+                "reporting",
+            ]
+        )
+
+        finance_context = any(
+            w in job_text
+            for w in [
+                "finance",
+                "risk",
+                "portfolio",
+                "investment",
+                "credit",
+                "covenant",
+                "pricing",
+                "financial",
+                "modelling",
+                "modeling",
+            ]
+        )
+
+        marketing_context = any(
+            w in job_text
+            for w in [
+                "marketing",
+                "media",
+                "ads",
+                "campaign",
+                "crm",
+                "seo",
+                "sea",
+                "acquisition",
+                "performance marketing",
+            ]
+        )
+
+        if supply_context:
+            if "sap supply" in combined or ("sap" in combined and "supply" in combined):
+                base += 140
+
+            if "rise" in combined and "sap" in combined:
+                base += 130
+
+            if "s/4hana" in combined or "s4hana" in combined or "4hana" in combined:
+                base += 120
+
+            if "sap" in combined:
+                base += 90
+
+            if "ewm" in combined:
+                base += 80
+
+            if "supply chain" in combined:
+                base += 70
+
+            if "forecast" in combined or "forecasting" in combined:
+                base += 25
+
+            if "risk" in combined or "portfolio" in combined:
+                base -= 90
+
+            if not marketing_context:
+                if any(w in combined for w in ["marketing", "media", "ads", "seo", "sea", "crm"]):
+                    base -= 70
+
+        if data_context:
+            if "forecast" in combined or "forecasting" in combined:
+                base += 80
+
+            if "data" in combined or "ibm" in combined:
+                base += 70
+
+            if "analytics" in combined or "dashboard" in combined:
+                base += 60
+
+        if finance_context:
+            if "risk" in combined or "portfolio" in combined:
+                base += 90
+
+            if "financial" in combined or "finance" in combined:
+                base += 70
+        else:
+            if "risk" in combined or "portfolio" in combined:
+                base -= 60
+
+        if marketing_context:
+            if any(w in combined for w in ["marketing", "media", "ads", "seo", "sea", "crm"]):
+                base += 80
+
+        return base
+
     df = df.copy()
-    df["_score"] = df.apply(lambda row: score_row(row, parsed_job), axis=1)
-    df = sort_by_recency(df)
+    df["_score"] = df.apply(cert_score, axis=1)
+    df["_sort_year"] = df.apply(get_row_year, axis=1)
+    df = df.sort_values(by=["_score", "_sort_year"], ascending=[False, False])
 
     selected = []
+    seen = set()
 
     for _, row in df.iterrows():
         cert_name = get_value(
@@ -568,6 +753,7 @@ def select_certifications(df, parsed_job, max_certs=2):
             [
                 "issuer",
                 "organization",
+                "organisation",
                 "company",
                 "provider",
                 "school",
@@ -584,9 +770,13 @@ def select_certifications(df, parsed_job, max_certs=2):
             continue
 
         line = clean_dash_join(cert_name, issuer)
+        key = normalize_text(line)
 
-        if line and line not in selected:
-            selected.append(line)
+        if not line or key in seen:
+            continue
+
+        seen.add(key)
+        selected.append(line)
 
         if len(selected) >= max_certs:
             break
@@ -613,9 +803,13 @@ SKILL_TRANSLATIONS = {
     "purchasing": "Achats",
     "inventory management": "Gestion des stocks",
     "stock management": "Gestion des stocks",
+    "stock rotation management": "Gestion de la rotation des stocks",
     "supply chain coordination": "Coordination supply chain",
     "warehouse management": "Gestion d’entrepôt",
+    "warehousing operations": "Opérations d’entrepôt",
     "transport coordination": "Coordination transport",
+    "logistics coordination": "Coordination logistique",
+    "cross-border operations": "Opérations cross-border",
     "process optimization": "Optimisation des processus",
     "business intelligence": "Business Intelligence",
     "dashboarding": "Dashboarding",
@@ -629,6 +823,13 @@ SKILL_TRANSLATIONS = {
     "media buying": "Achat média",
     "seo": "SEO",
     "sea": "SEA",
+    "sql": "SQL",
+    "python": "Python",
+    "looker": "Looker",
+    "power bi": "Power BI",
+    "sap": "SAP",
+    "sap ewm": "SAP EWM",
+    "sap s/4hana": "SAP S/4HANA",
 }
 
 
@@ -642,17 +843,214 @@ def translate_skill(skill):
     return raw
 
 
+def is_skill_allowed_for_job(skill, job_text):
+    skill_norm = normalize_text(skill)
+
+    supply_context = any(
+        w in job_text
+        for w in [
+            "adv",
+            "import",
+            "export",
+            "logistics",
+            "warehouse",
+            "transport",
+            "supply",
+            "procurement",
+            "stock",
+            "inventory",
+            "delivery",
+            "trade",
+            "sap",
+            "slas",
+            "order",
+            "customer service",
+            "supply chain",
+        ]
+    )
+
+    data_context = any(
+        w in job_text
+        for w in [
+            "data",
+            "analytics",
+            "dashboard",
+            "reporting",
+            "sql",
+            "python",
+            "bi",
+            "kpi",
+            "forecast",
+            "forecasting",
+            "analysis",
+            "analyst",
+        ]
+    )
+
+    marketing_context = any(
+        w in job_text
+        for w in [
+            "marketing",
+            "media",
+            "ads",
+            "crm",
+            "campaign",
+            "seo",
+            "sea",
+            "acquisition",
+            "paid",
+            "performance marketing",
+            "content",
+            "social media",
+        ]
+    )
+
+    web_context = any(
+        w in job_text
+        for w in [
+            "webflow",
+            "figma",
+            "website",
+            "site web",
+            "ux",
+            "ui",
+            "frontend",
+            "backend",
+            "developer",
+            "developpeur",
+        ]
+    )
+
+    blocked_for_supply = [
+        "meta_ads",
+        "meta ads",
+        "google ads",
+        "paid media",
+        "media buying",
+        "seo",
+        "sea",
+        "mailchimp",
+        "email marketing",
+        "crm",
+        "figma",
+        "webflow",
+        "website",
+        "website_management",
+        "ux",
+        "ui",
+        "acquisition",
+        "copywriting",
+        "community management",
+        "social media",
+    ]
+
+    if supply_context and not marketing_context and not web_context:
+        if any(blocked in skill_norm for blocked in blocked_for_supply):
+            return False
+
+    data_tools = [
+        "sql",
+        "python",
+        "looker",
+        "power bi",
+        "dashboard",
+        "business intelligence",
+    ]
+
+    if any(tool in skill_norm for tool in data_tools) and not data_context:
+        return False
+
+    return True
+
+
 def select_technical_skills(skills_df, selected_experiences, parsed_job, max_skills=8):
     job_text = parsed_job["normalized_text"]
 
     candidates = []
 
-    # 1. Depuis la feuille skills
+    supply_context = any(
+        w in job_text
+        for w in [
+            "adv",
+            "import",
+            "export",
+            "supply",
+            "chain",
+            "warehouse",
+            "transport",
+            "procurement",
+            "stock",
+            "inventory",
+            "logistics",
+            "delivery",
+            "trade",
+            "sap",
+            "slas",
+            "order",
+            "customer service",
+        ]
+    )
+
+    data_context = any(
+        w in job_text
+        for w in [
+            "data",
+            "analyst",
+            "analytics",
+            "dashboard",
+            "reporting",
+            "kpi",
+            "sql",
+            "python",
+            "power bi",
+            "forecast",
+            "forecasting",
+        ]
+    )
+
+    marketing_context = any(
+        w in job_text
+        for w in [
+            "marketing",
+            "media",
+            "ads",
+            "crm",
+            "campaign",
+            "acquisition",
+            "seo",
+            "sea",
+            "paid",
+        ]
+    )
+
+    web_context = any(
+        w in job_text
+        for w in [
+            "webflow",
+            "figma",
+            "website",
+            "site web",
+            "ux",
+            "ui",
+            "frontend",
+            "backend",
+            "developer",
+            "developpeur",
+        ]
+    )
+
+    # 1. Skills depuis la feuille skills
     if not skills_df.empty:
         for _, row in skills_df.iterrows():
             skill_name = get_value(
                 row,
-                ["skill_name", "name", "skill", "competence", "compétence"],
+                [
+                    "skill_name",
+                    "name",
+                    "skill",
+                    "competence",
+                    "compétence",
+                ],
                 "",
             )
 
@@ -660,30 +1058,110 @@ def select_technical_skills(skills_df, selected_experiences, parsed_job, max_ski
                 continue
 
             searchable = row_search_text(row)
+            skill_norm = normalize_text(skill_name)
+
             score = 0
 
             for keyword in parsed_job["keywords"]:
                 if keyword in searchable:
                     score += 3
 
-            if normalize_text(skill_name) in job_text:
-                score += 12
+            if skill_norm and skill_norm in job_text:
+                score += 20
 
-            # Boost supply / ops
-            supply_words = [
-                "sap", "ewm", "supply", "procurement", "achats", "stock",
-                "inventory", "export", "import", "incoterms", "warehouse",
-                "transport", "forecast", "operations"
-            ]
+            if supply_context:
+                supply_boosts = {
+                    "sap": 45,
+                    "sap ewm": 40,
+                    "s/4hana": 38,
+                    "s4hana": 38,
+                    "4hana": 38,
+                    "adv": 35,
+                    "import": 34,
+                    "export": 34,
+                    "incoterms": 34,
+                    "fca": 28,
+                    "cpt": 28,
+                    "dap": 28,
+                    "logistics": 30,
+                    "logistique": 30,
+                    "warehouse": 28,
+                    "entrepot": 28,
+                    "transport": 26,
+                    "delivery": 26,
+                    "livraison": 26,
+                    "supply": 32,
+                    "procurement": 26,
+                    "achats": 24,
+                    "stock": 26,
+                    "inventory": 26,
+                    "order": 22,
+                    "operations": 22,
+                    "slas": 20,
+                }
 
-            for word in supply_words:
-                if word in job_text and word in searchable:
-                    score += 8
+                for word, weight in supply_boosts.items():
+                    if word in searchable or word in skill_norm:
+                        score += weight
+
+            if data_context:
+                data_boosts = {
+                    "sql": 35,
+                    "python": 35,
+                    "looker": 30,
+                    "power bi": 30,
+                    "dashboard": 30,
+                    "reporting": 28,
+                    "kpi": 28,
+                    "forecast": 28,
+                    "analytics": 25,
+                    "analyse de donnees": 25,
+                    "data": 25,
+                }
+
+                for word, weight in data_boosts.items():
+                    if word in searchable or word in skill_norm:
+                        score += weight
+
+            if marketing_context:
+                marketing_boosts = {
+                    "meta ads": 35,
+                    "google ads": 35,
+                    "paid media": 32,
+                    "media buying": 32,
+                    "seo": 30,
+                    "sea": 30,
+                    "crm": 28,
+                    "mailchimp": 25,
+                    "email marketing": 25,
+                    "acquisition": 25,
+                    "campaign": 22,
+                }
+
+                for word, weight in marketing_boosts.items():
+                    if word in searchable or word in skill_norm:
+                        score += weight
+
+            if web_context:
+                web_boosts = {
+                    "webflow": 35,
+                    "figma": 32,
+                    "ux": 28,
+                    "ui": 28,
+                    "frontend": 25,
+                    "backend": 25,
+                    "website": 25,
+                    "site web": 25,
+                }
+
+                for word, weight in web_boosts.items():
+                    if word in searchable or word in skill_norm:
+                        score += weight
 
             if score > 0:
                 candidates.append((translate_skill(skill_name), score))
 
-    # 2. Depuis expériences sélectionnées
+    # 2. Skills depuis les expériences sélectionnées
     for row in selected_experiences:
         for col in [
             "tools_verified",
@@ -692,34 +1170,110 @@ def select_technical_skills(skills_df, selected_experiences, parsed_job, max_ski
             "skills",
             "skill_tags",
             "technical_skills",
+            "skills_transferable",
+            "skills_exposed",
         ]:
             raw = get_value(row, [col], "")
+
             for skill in split_multi_value(raw):
                 skill_norm = normalize_text(skill)
-                score = 2
+
+                if not skill_norm:
+                    continue
+
+                score = 3
 
                 if skill_norm in job_text:
-                    score += 10
+                    score += 15
+
+                if supply_context:
+                    if any(
+                        w in skill_norm
+                        for w in [
+                            "sap",
+                            "ewm",
+                            "s/4hana",
+                            "s4hana",
+                            "adv",
+                            "import",
+                            "export",
+                            "incoterms",
+                            "fca",
+                            "cpt",
+                            "dap",
+                            "logistics",
+                            "logistique",
+                            "transport",
+                            "warehouse",
+                            "stock",
+                            "inventory",
+                            "supply",
+                            "procurement",
+                            "delivery",
+                            "operations",
+                        ]
+                    ):
+                        score += 30
+
+                if data_context:
+                    if any(
+                        w in skill_norm
+                        for w in [
+                            "sql",
+                            "python",
+                            "looker",
+                            "power bi",
+                            "dashboard",
+                            "reporting",
+                            "kpi",
+                            "data",
+                            "analytics",
+                            "forecast",
+                        ]
+                    ):
+                        score += 28
+
+                if marketing_context:
+                    if any(
+                        w in skill_norm
+                        for w in [
+                            "meta ads",
+                            "google ads",
+                            "paid media",
+                            "media buying",
+                            "seo",
+                            "sea",
+                            "crm",
+                            "mailchimp",
+                            "campaign",
+                        ]
+                    ):
+                        score += 28
 
                 candidates.append((translate_skill(skill), score))
 
-    # 3. Fallback contextualisé
+    # 3. Fallback contextualisé propre
     fallback_by_context = []
 
-    if any(w in job_text for w in ["supply", "chain", "warehouse", "transport", "procurement", "stock", "inventory", "logistics"]):
+    if supply_context:
         fallback_by_context += [
             "SAP",
             "SAP EWM",
-            "Coordination supply chain",
-            "Gestion des stocks",
-            "Achats / Procurement",
+            "SAP S/4HANA",
+            "Gestion ADV",
             "Gestion export",
             "Gestion import",
             "Incoterms (FCA, CPT, DAP)",
-            "Optimisation des processus",
+            "Coordination logistique",
+            "Coordination supply chain",
+            "Gestion des stocks",
+            "Suivi des livraisons",
+            "Gestion des opérations",
+            "Reporting opérationnel",
+            "Suivi des KPI",
         ]
 
-    if any(w in job_text for w in ["data", "analyst", "analytics", "dashboard", "reporting", "kpi"]):
+    if data_context:
         fallback_by_context += [
             "Excel",
             "SQL",
@@ -729,9 +1283,11 @@ def select_technical_skills(skills_df, selected_experiences, parsed_job, max_ski
             "Reporting",
             "Suivi des KPI",
             "Analyse de données",
+            "Dashboarding",
+            "Prévision de la demande",
         ]
 
-    if any(w in job_text for w in ["marketing", "media", "ads", "crm", "campaign", "acquisition"]):
+    if marketing_context:
         fallback_by_context += [
             "Achat média",
             "Meta Ads",
@@ -743,10 +1299,19 @@ def select_technical_skills(skills_df, selected_experiences, parsed_job, max_ski
             "Analyse de performance",
         ]
 
-    for skill in fallback_by_context:
-        candidates.append((skill, 5))
+    if web_context:
+        fallback_by_context += [
+            "Webflow",
+            "Figma",
+            "UI/UX",
+            "Automatisation backend",
+            "Optimisation site web",
+        ]
 
-    # Déduplication avec score max
+    for skill in fallback_by_context:
+        candidates.append((skill, 10))
+
+    # 4. Filtrage, traduction, déduplication
     score_by_skill = {}
 
     for skill, score in candidates:
@@ -755,9 +1320,20 @@ def select_technical_skills(skills_df, selected_experiences, parsed_job, max_ski
         if not skill:
             continue
 
+        skill = translate_skill(skill)
+
+        if not is_skill_allowed_for_job(skill, job_text):
+            continue
+
         key = normalize_text(skill)
 
         if not key:
+            continue
+
+        if "_" in key and " " in key:
+            continue
+
+        if "meta_ads_manager" in key:
             continue
 
         if key not in score_by_skill or score > score_by_skill[key][1]:
@@ -765,7 +1341,48 @@ def select_technical_skills(skills_df, selected_experiences, parsed_job, max_ski
 
     ranked = sorted(score_by_skill.values(), key=lambda x: x[1], reverse=True)
 
-    return [skill for skill, _ in ranked[:max_skills]]
+    if supply_context and not data_context:
+        preferred_supply_order = [
+            "SAP",
+            "SAP EWM",
+            "SAP S/4HANA",
+            "Gestion ADV",
+            "Gestion export",
+            "Gestion import",
+            "Incoterms (FCA, CPT, DAP)",
+            "Coordination logistique",
+            "Coordination supply chain",
+            "Gestion des stocks",
+            "Suivi des livraisons",
+            "Gestion des opérations",
+            "Reporting opérationnel",
+        ]
+
+        selected = []
+        available = {normalize_text(skill): skill for skill, _ in ranked}
+
+        for preferred in preferred_supply_order:
+            key = normalize_text(preferred)
+            if key in available and available[key] not in selected:
+                selected.append(available[key])
+            elif preferred not in selected:
+                selected.append(preferred)
+
+            if len(selected) >= max_skills:
+                break
+
+        return selected
+
+    selected = []
+
+    for skill, _ in ranked:
+        if skill not in selected:
+            selected.append(skill)
+
+        if len(selected) >= max_skills:
+            break
+
+    return selected
 
 
 # ============================================================
@@ -817,7 +1434,7 @@ def format_leadership(row):
 
 
 # ============================================================
-# OUTPUT FILENAME
+# OUTPUT
 # ============================================================
 
 def build_output_filename(parsed_job):
@@ -838,8 +1455,8 @@ def build_output_filename(parsed_job):
     ]
 
     if (
-        len(title_clean) > 60
-        or title_clean.count(" ") > 6
+        len(title_clean) > 70
+        or title_clean.count(" ") > 8
         or any(fragment in title_clean for fragment in bad_fragments)
     ):
         title = "Poste cible"
@@ -860,10 +1477,6 @@ def build_output_filename(parsed_job):
     return filename
 
 
-# ============================================================
-# BUILD REPLACEMENTS
-# ============================================================
-
 def build_replacements(experiences, leadership, certifications, technical_skills):
     exp1 = experiences[0] if len(experiences) > 0 else {}
     exp2 = experiences[1] if len(experiences) > 1 else {}
@@ -871,10 +1484,8 @@ def build_replacements(experiences, leadership, certifications, technical_skills
     lead1 = leadership[0] if len(leadership) > 0 else {}
 
     replacements = {
-        # Certifications
         "[[CERTIFICATION_ENTRIES]]": "\n".join(certifications),
 
-        # Expérience 1
         "[[EXP_1_COMPAGNY]]": exp1.get("company", ""),
         "[[EXP_1_COMPANY]]": exp1.get("company", ""),
         "[[EXP_1_POSITION_TITLE]]": exp1.get("position", ""),
@@ -882,7 +1493,6 @@ def build_replacements(experiences, leadership, certifications, technical_skills
         "[[EXP_1_DATES]]": exp1.get("dates", ""),
         "[[EXP_1_BULLETS]]": exp1.get("bullets", []),
 
-        # Expérience 2
         "[[EXP_2_COMPAGNY]]": exp2.get("company", ""),
         "[[EXP_2_COMPANY]]": exp2.get("company", ""),
         "[[EXP_2_POSITION_TITLE]]": exp2.get("position", ""),
@@ -890,18 +1500,72 @@ def build_replacements(experiences, leadership, certifications, technical_skills
         "[[EXP_2_DATES]]": exp2.get("dates", ""),
         "[[EXP_2_BULLETS]]": exp2.get("bullets", []),
 
-        # Leadership
         "[[LEAD_1_ORG]]": lead1.get("org", ""),
         "[[LEAD_1_ROLE]]": lead1.get("role", ""),
         "[[LEAD_1_LOCATION]]": lead1.get("location", ""),
         "[[LEAD_1_DATES]]": lead1.get("dates", ""),
         "[[LEAD_1_BULLETS]]": lead1.get("bullets", []),
 
-        # Skills
         "[[TECHNICAL_SKILLS]]": ", ".join(technical_skills),
     }
 
     return replacements
+
+
+def write_last_run_report(
+    parsed_job,
+    output_path,
+    selected_exp_rows,
+    selected_experiences,
+    selected_lead_rows,
+    selected_leadership,
+    selected_certifications,
+    selected_skills,
+):
+    report = {
+        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "mode": "local",
+        "company_detected": parsed_job.get("company"),
+        "job_title_detected": parsed_job.get("job_title"),
+        "keywords_detected": parsed_job.get("keywords", [])[:50],
+        "output_docx": str(output_path),
+        "selected_experiences": [],
+        "selected_leadership": [],
+        "selected_certifications": selected_certifications,
+        "selected_technical_skills": selected_skills,
+        "warnings": [],
+    }
+
+    for row, exp in zip(selected_exp_rows, selected_experiences):
+        report["selected_experiences"].append(
+            {
+                "company": exp.get("company"),
+                "position_title": exp.get("position"),
+                "location": exp.get("location"),
+                "dates": exp.get("dates"),
+                "score": float(row.get("_score", 0)) if "_score" in row.index else None,
+                "reason_tags": split_multi_value(
+                    get_value(row, ["job_family_tags", "industry_tags", "skills_verified"], "")
+                )[:20],
+            }
+        )
+
+    for row, lead in zip(selected_lead_rows, selected_leadership):
+        report["selected_leadership"].append(
+            {
+                "organisation": lead.get("org"),
+                "role": lead.get("role"),
+                "location": lead.get("location"),
+                "dates": lead.get("dates"),
+                "score": float(row.get("_score", 0)) if "_score" in row.index else None,
+            }
+        )
+
+    report_path = OUTPUT_DIR / "last_run_report.json"
+    report_path.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
 
 # ============================================================
@@ -925,14 +1589,7 @@ def main():
 
     print("Sélection des expériences...")
     selected_exp_rows = select_top_rows(experiences_df, parsed_job, max_rows=2)
-    selected_exp_rows = sorted(
-        selected_exp_rows,
-        key=lambda row: max(
-            (int(y) for y in re.findall(r"(20\d{2}|19\d{2})", safe_str(get_value(row, ["date_end", "end_year", "year", "date", "dates"], "")))),
-            default=0,
-        ),
-        reverse=True,
-    )
+    selected_exp_rows = sorted(selected_exp_rows, key=get_row_year, reverse=True)
     selected_experiences = [format_experience(row) for row in selected_exp_rows]
 
     print("Sélection du leadership...")
@@ -978,9 +1635,7 @@ def main():
     print("\nCompétences techniques sélectionnées :")
     print(", ".join(selected_skills))
 
-    print("")
-
-    print("Construction du CV...")
+    print("\nConstruction du CV...")
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -990,10 +1645,22 @@ def main():
     renderer = DocxTemplateRenderer(BASE_CV_TEMPLATE_PATH)
     renderer.render(replacements, output_path)
 
-    if output_path.exists():
-        print(f"CV généré : {output_path}")
-    else:
+    if not output_path.exists():
         raise RuntimeError(f"Le fichier n'a pas été généré : {output_path}")
+
+    write_last_run_report(
+        parsed_job=parsed_job,
+        output_path=output_path,
+        selected_exp_rows=selected_exp_rows,
+        selected_experiences=selected_experiences,
+        selected_lead_rows=selected_lead_rows,
+        selected_leadership=selected_leadership,
+        selected_certifications=selected_certifications,
+        selected_skills=selected_skills,
+    )
+
+    print(f"CV généré : {output_path}")
+    print(f"Rapport généré : {OUTPUT_DIR / 'last_run_report.json'}")
 
 
 if __name__ == "__main__":
