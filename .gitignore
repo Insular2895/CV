@@ -1,0 +1,38 @@
+# Données personnelles (ne pas versionner)
+data/reference/master_profile.xlsx
+data/input/job_description.txt
+
+# CV générés
+data/output/
+
+# Environnements Python
+src/.venv/
+.venv/
+venv/
+env/
+
+# Cache Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# VS Code (optionnel - à garder pour partager la config interpréteur)
+# .vscode/
+
+# Claude
+data/.claude/
+
+# Sauvegarde de session
+src/_broken_20260426/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Divers
+*.log
+*.tmp
