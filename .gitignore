@@ -1,8 +1,10 @@
-# Données personnelles (ne pas versionner)
+# Données personnelles / sensibles
+.env
+credentials/
 data/reference/master_profile.xlsx
 data/input/job_description.txt
 
-# CV générés
+# Fichiers générés
 data/output/
 
 # Environnements Python
@@ -21,25 +23,13 @@ __pycache__/
 .DS_Store
 **/.DS_Store
 
-# VS Code (optionnel - à garder pour partager la config interpréteur)
-# .vscode/
-
-# Claude
+# Claude / fichiers temporaires
 data/.claude/
-
-# Sauvegarde de session
 src/_broken_20260426/
 
 # Jupyter
 .ipynb_checkpoints/
 
-# Divers
+# Logs / temporaires
 *.log
 *.tmp
-
-.env
-credentials/
-data/output/
-__pycache__/
-*.pyc
-.DS_Store
