@@ -5,6 +5,7 @@ from docx import Document
 from docx.text.paragraph import Paragraph
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
+from docx.shared import Pt
 
 
 DEFAULT_FONT_NAME = "Calibri"
@@ -35,6 +36,7 @@ class DocxTemplateRenderer:
                         self._replace_paragraph(paragraph, replacements)
 
         self._force_document_font(doc, DEFAULT_FONT_NAME)
+        self._force_font_sizes(doc)
 
         doc.save(output_path)
         return output_path
@@ -274,3 +276,24 @@ class DocxTemplateRenderer:
         r_fonts.set(qn("w:hAnsi"), font_name)
         r_fonts.set(qn("w:eastAsia"), font_name)
         r_fonts.set(qn("w:cs"), font_name)
+
+    def _force_font_sizes(self, doc):
+        """
+        Force 10pt partout, 11pt pour les paragraphes dont au moins un run est bold.
+        Évite le mélange de tailles causé par l'injection de runs via python-docx.
+        """
+        all_paragraphs = list(doc.paragraphs)
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    all_paragraphs.extend(cell.paragraphs)
+
+        for paragraph in all_paragraphs:
+            if not paragraph.runs:
+                continue
+
+            is_bold = any(run.bold for run in paragraph.runs if run.text.strip())
+            target_size = Pt(11) if is_bold else Pt(10)
+
+            for run in paragraph.runs:
+                run.font.size = target_size

@@ -7,7 +7,7 @@ import unicodedata
 import pandas as pd
 
 from src.render.docx_template import DocxTemplateRenderer
-from src.llm.cv_enhancer import improve_bullets_with_gemini
+from src.llm.cv_enhancer import improve_full_cv_with_gemini
 
 
 # ============================================================
@@ -557,15 +557,6 @@ def extract_truth_bullets(row, max_bullets=4):
     )
 
     return split_bullets(raw, max_bullets=max_bullets)
-
-
-def optimize_bullets_with_gemini(bullets, job_text):
-    """
-    Optimise une liste de bullets avec Gemini en un seul appel.
-    Si Gemini est désactivé ou échoue, les bullets originales sont conservées.
-    """
-
-    return improve_bullets_with_gemini(bullets, job_text)
 
 
 # ============================================================
@@ -1399,7 +1390,7 @@ def select_technical_skills(skills_df, selected_experiences, parsed_job, max_ski
 # FORMAT ROWS
 # ============================================================
 
-def format_experience(row, job_text=""):
+def format_experience(row):
     company = get_value(row, ["company", "organisation", "organization", "org", "entreprise"], "")
     position = get_value(row, ["position_title", "position", "title", "job_title", "role"], "")
     location = get_value(row, ["location", "city", "city_state", "lieu"], "")
@@ -1412,19 +1403,16 @@ def format_experience(row, job_text=""):
         end = get_value(row, ["date_end", "end_year"], "")
         dates = clean_dash_join(format_year_or_date(start), format_year_or_date(end))
 
-    original_bullets = extract_truth_bullets(row, max_bullets=4)
-    optimized_bullets = optimize_bullets_with_gemini(original_bullets, job_text)
-
     return {
         "company": company,
         "position": position,
         "location": location,
         "dates": dates,
-        "bullets": optimized_bullets,
+        "bullets": extract_truth_bullets(row, max_bullets=4),
     }
 
 
-def format_leadership(row, job_text=""):
+def format_leadership(row):
     org = get_value(row, ["organisation", "organization", "company", "org", "activity", "project"], "")
     role = get_value(row, ["role", "position_title", "position", "title"], "")
     location = get_value(row, ["city", "location", "city_state", "lieu"], "")
@@ -1437,15 +1425,12 @@ def format_leadership(row, job_text=""):
         end = get_value(row, ["date_end", "end_year"], "")
         dates = clean_dash_join(format_year_or_date(start), format_year_or_date(end))
 
-    original_bullets = extract_truth_bullets(row, max_bullets=2)
-    optimized_bullets = optimize_bullets_with_gemini(original_bullets, job_text)
-
     return {
         "org": org,
         "role": role,
         "location": location,
         "dates": dates,
-        "bullets": optimized_bullets,
+        "bullets": extract_truth_bullets(row, max_bullets=2),
     }
 
 
@@ -1606,11 +1591,18 @@ def main():
     print("Sélection des expériences...")
     selected_exp_rows = select_top_rows(experiences_df, parsed_job, max_rows=2)
     selected_exp_rows = sorted(selected_exp_rows, key=get_row_year, reverse=True)
-    selected_experiences = [format_experience(row, job_text) for row in selected_exp_rows]
+    selected_experiences = [format_experience(row) for row in selected_exp_rows]
 
     print("Sélection du leadership...")
     selected_lead_rows = select_top_rows(leadership_df, parsed_job, max_rows=1)
-    selected_leadership = [format_leadership(row, job_text) for row in selected_lead_rows]
+    selected_leadership = [format_leadership(row) for row in selected_lead_rows]
+
+    print("Optimisation Gemini du CV complet...")
+    selected_experiences, selected_leadership = improve_full_cv_with_gemini(
+        selected_experiences,
+        selected_leadership,
+        job_text,
+    )
 
     print("Sélection des certifications...")
     selected_certifications = select_certifications(certifications_df, parsed_job, max_certs=2)

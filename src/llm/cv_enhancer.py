@@ -1,106 +1,138 @@
+import json
+from copy import deepcopy
+
 from src.llm.gemini_client import ask_gemini, is_gemini_enabled
 
 
-def improve_cv_text_with_gemini(text: str, job_text: str) -> str:
+def clean_json_response(text: str) -> str:
+    cleaned = text.strip()
+
+    if cleaned.startswith("```json"):
+        cleaned = cleaned.replace("```json", "", 1).strip()
+
+    if cleaned.startswith("```"):
+        cleaned = cleaned.replace("```", "", 1).strip()
+
+    if cleaned.endswith("```"):
+        cleaned = cleaned[:-3].strip()
+
+    return cleaned
+
+
+def improve_full_cv_with_gemini(selected_experiences, selected_leadership, job_text):
     """
-    Améliore un texte simple avec Gemini.
-    Fallback : retourne le texte original.
+    Optimise tous les bullets du CV en un seul appel Gemini.
+    Fallback : retourne les contenus originaux si Gemini échoue.
     """
 
     if not is_gemini_enabled():
-        return text
+        return selected_experiences, selected_leadership
 
-    if not text or not text.strip():
-        return text
+    experiences_copy = deepcopy(selected_experiences)
+    leadership_copy = deepcopy(selected_leadership)
+
+    payload = {
+        "experiences": [
+            {
+                "index": index,
+                "company": exp.get("company", ""),
+                "position": exp.get("position", ""),
+                "bullets": exp.get("bullets", []),
+            }
+            for index, exp in enumerate(experiences_copy)
+        ],
+        "leadership": [
+            {
+                "index": index,
+                "org": lead.get("org", ""),
+                "role": lead.get("role", ""),
+                "bullets": lead.get("bullets", []),
+            }
+            for index, lead in enumerate(leadership_copy)
+        ],
+    }
 
     prompt = f"""
 Tu es un expert CV ATS.
 
 Objectif :
-Améliore ce texte de CV pour qu'il corresponde mieux à l'offre.
+Réécris les bullets du CV pour mieux correspondre à l'offre.
 
 Contraintes strictes :
-- ne mens pas
-- n'invente aucun chiffre
-- ne crée aucune expérience
-- garde le sens original
-- style professionnel
-- phrase plus claire, plus directe, plus orientée impact
-- français naturel
-- réponse uniquement avec le texte amélioré, sans explication
-
-Offre :
-{job_text}
-
-Texte CV original :
-{text}
-"""
-
-    try:
-        improved = ask_gemini(prompt)
-        return improved if improved else text
-    except Exception as error:
-        print(f"[Gemini fallback] {error}")
-        return text
-
-
-def improve_bullets_with_gemini(bullets: list, job_text: str) -> list:
-    """
-    Améliore une liste de bullets en un seul appel Gemini.
-    Fallback : retourne les bullets originales.
-    """
-
-    if not is_gemini_enabled():
-        return bullets
-
-    if not bullets:
-        return bullets
-
-    bullets_text = "\n".join([f"- {bullet}" for bullet in bullets])
-
-    prompt = f"""
-Tu es un expert CV ATS.
-
-Objectif :
-Réécris ces bullets de CV pour mieux correspondre à l'offre.
-
-Contraintes strictes :
-- conserve exactement le même nombre de bullets
 - ne mens pas
 - n'invente aucun chiffre
 - n'ajoute aucune expérience
 - garde le sens original
-- améliore la clarté et l'impact
+- conserve exactement le même nombre de bullets pour chaque bloc
+- améliore la clarté, l'impact et la correspondance avec l'offre
 - style professionnel
 - français naturel
-- chaque bullet doit rester court
-- réponse uniquement sous forme de liste avec un bullet par ligne
+- bullets courts
+- ne modifie pas les noms d'entreprise, postes, lieux ou dates
+- réponse uniquement en JSON valide
 - aucun commentaire avant ou après
+
+Format de réponse obligatoire :
+{{
+  "experiences": [
+    {{
+      "index": 0,
+      "bullets": ["bullet 1", "bullet 2"]
+    }}
+  ],
+  "leadership": [
+    {{
+      "index": 0,
+      "bullets": ["bullet 1", "bullet 2"]
+    }}
+  ]
+}}
 
 Offre :
 {job_text}
 
-Bullets CV originaux :
-{bullets_text}
+CV à optimiser :
+{json.dumps(payload, ensure_ascii=False, indent=2)}
 """
 
     try:
         response = ask_gemini(prompt)
+        response_json = json.loads(clean_json_response(response))
 
-        improved_bullets = []
-        for line in response.splitlines():
-            cleaned = line.strip()
-            cleaned = cleaned.lstrip("-").lstrip("•").lstrip("*").strip()
+        for item in response_json.get("experiences", []):
+            index = item.get("index")
+            new_bullets = item.get("bullets", [])
 
-            if cleaned:
-                improved_bullets.append(cleaned)
+            if not isinstance(index, int) or index < 0 or index >= len(experiences_copy):
+                continue
 
-        if len(improved_bullets) != len(bullets):
-            print("[Gemini fallback] Nombre de bullets différent, conservation des bullets originales.")
-            return bullets
+            old_bullets = experiences_copy[index].get("bullets", [])
 
-        return improved_bullets
+            if len(new_bullets) == len(old_bullets):
+                experiences_copy[index]["bullets"] = [
+                    str(b).strip().lstrip("-").lstrip("•").lstrip("*").strip()
+                    for b in new_bullets
+                    if str(b).strip()
+                ]
+
+        for item in response_json.get("leadership", []):
+            index = item.get("index")
+            new_bullets = item.get("bullets", [])
+
+            if not isinstance(index, int) or index < 0 or index >= len(leadership_copy):
+                continue
+
+            old_bullets = leadership_copy[index].get("bullets", [])
+
+            if len(new_bullets) == len(old_bullets):
+                leadership_copy[index]["bullets"] = [
+                    str(b).strip().lstrip("-").lstrip("•").lstrip("*").strip()
+                    for b in new_bullets
+                    if str(b).strip()
+                ]
+
+        return experiences_copy, leadership_copy
 
     except Exception as error:
-        print(f"[Gemini fallback] {error}")
-        return bullets
+        print(f"[Gemini fallback full CV] {error}")
+        return selected_experiences, selected_leadership

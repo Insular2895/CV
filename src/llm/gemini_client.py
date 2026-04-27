@@ -1,80 +1,110 @@
+import json
 import os
-import time
+from datetime import date
+from pathlib import Path
 
 
-def is_gemini_enabled() -> bool:
+ROOT_DIR = Path(__file__).resolve().parents[2]
+STATE_PATH = ROOT_DIR / "data" / "output" / "gemini_rotation_state.json"
+
+
+def is_gemini_enabled():
     return os.getenv("USE_GEMINI", "false").lower() in ["1", "true", "yes"]
 
 
-def get_model_chain(model=None):
-    """
-    Retourne la liste des modèles à essayer dans l'ordre.
-    Exemple :
-    GEMINI_MODEL=gemini-3-flash-preview
-    GEMINI_FALLBACK_MODELS=gemini-2.5-flash,gemini-2.5-flash-lite
-    """
-
-    primary_model = model or os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-
-    fallback_models_raw = os.getenv(
-        "GEMINI_FALLBACK_MODELS",
-        "gemini-2.5-flash,gemini-2.5-flash-lite"
+def get_rotation_models():
+    raw = os.getenv(
+        "GEMINI_ROTATION_MODELS",
+        "gemini-2.5-flash-lite,gemini-2.5-flash,gemini-2.5-flash-preview-05-20",
     )
 
-    fallback_models = [
-        item.strip()
-        for item in fallback_models_raw.split(",")
-        if item.strip()
-    ]
+    models = [item.strip() for item in raw.split(",") if item.strip()]
 
-    model_chain = [primary_model] + fallback_models
+    if not models:
+        models = ["gemini-2.5-flash-lite"]
 
-    # Supprime les doublons en gardant l'ordre
-    seen = set()
-    unique_models = []
-
-    for item in model_chain:
-        if item not in seen:
-            unique_models.append(item)
-            seen.add(item)
-
-    return unique_models
+    return models
 
 
-def is_retryable_gemini_error(error: Exception) -> bool:
+def get_daily_limit_per_model():
+    raw = os.getenv("GEMINI_DAILY_LIMIT_PER_MODEL", "20")
+
+    try:
+        return int(raw)
+    except ValueError:
+        return 20
+
+
+def load_rotation_state():
+    today = date.today().isoformat()
+
+    default = {"date": today, "last_index": -1, "usage": {}}
+
+    if not STATE_PATH.exists():
+        return default
+
+    try:
+        state = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return default
+
+    if state.get("date") != today:
+        return default
+
+    state.setdefault("usage", {})
+    state.setdefault("last_index", -1)
+
+    return state
+
+
+def save_rotation_state(state):
+    STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    STATE_PATH.write_text(
+        json.dumps(state, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def choose_next_model():
     """
-    Erreurs temporaires : saturation, quota temporaire, service indisponible.
+    Choisit le prochain modèle en rotation et incrémente son compteur.
+    Retourne None si tous les modèles ont atteint leur limite quotidienne.
     """
 
-    error_text = str(error).lower()
+    models = get_rotation_models()
+    daily_limit = get_daily_limit_per_model()
+    state = load_rotation_state()
 
-    retryable_patterns = [
-        "503",
-        "unavailable",
-        "high demand",
-        "temporarily",
-        "timeout",
-        "deadline",
-        "429",
-        "rate limit",
-        "resource_exhausted",
-    ]
+    usage = state.get("usage", {})
+    last_index = int(state.get("last_index", -1))
 
-    return any(pattern in error_text for pattern in retryable_patterns)
+    for offset in range(1, len(models) + 1):
+        index = (last_index + offset) % len(models)
+        model = models[index]
+        used = int(usage.get(model, 0))
+
+        if used < daily_limit:
+            usage[model] = used + 1
+            state["usage"] = usage
+            state["last_index"] = index
+            save_rotation_state(state)
+            return model
+
+    return None
 
 
 def ask_gemini(prompt, model=None):
     """
-    Appelle Gemini avec :
-    - plusieurs modèles fallback
-    - retry court par modèle
-    - erreur finale claire si tout échoue
+    1 seul appel, 1 seul modèle, pas de retry, pas de fallback multi-modèle.
+    Si l'appel échoue, cv_enhancer catch l'exception et retourne les bullets originaux.
     """
 
     if not is_gemini_enabled():
         raise RuntimeError("Gemini est désactivé. Mets USE_GEMINI=true dans .env.")
 
-    if not os.getenv("GEMINI_API_KEY"):
+    api_key = os.getenv("GEMINI_API_KEY")
+
+    if not api_key:
         raise RuntimeError("GEMINI_API_KEY manquante dans .env.")
 
     try:
@@ -82,42 +112,18 @@ def ask_gemini(prompt, model=None):
     except ImportError:
         raise RuntimeError("Package google-genai manquant. Lance : pip install google-genai")
 
-    client = genai.Client()
+    selected_model = model or choose_next_model()
 
-    model_chain = get_model_chain(model)
-    wait_times = [0]
+    if not selected_model:
+        raise RuntimeError("Limite quotidienne locale atteinte pour tous les modèles Gemini.")
 
-    errors = []
+    print(f"[Gemini] Modèle utilisé : {selected_model}")
 
-    for selected_model in model_chain:
-        for wait_time in wait_times:
-            if wait_time > 0:
-                time.sleep(wait_time)
+    client = genai.Client(api_key=api_key)
 
-            try:
-                print(f"[Gemini] Tentative modèle : {selected_model}")
-
-                response = client.models.generate_content(
-                    model=selected_model,
-                    contents=prompt,
-                )
-
-                text = (response.text or "").strip()
-
-                if text:
-                    return text
-
-                errors.append(f"{selected_model}: réponse vide")
-
-            except Exception as error:
-                errors.append(f"{selected_model}: {error}")
-
-                if not is_retryable_gemini_error(error):
-                    raise error
-
-                print(f"[Gemini] Erreur temporaire sur {selected_model}, fallback/retry...")
-
-    raise RuntimeError(
-        "Gemini indisponible sur tous les modèles : "
-        + " | ".join(errors[-5:])
+    response = client.models.generate_content(
+        model=selected_model,
+        contents=prompt,
     )
+
+    return (response.text or "").strip()
