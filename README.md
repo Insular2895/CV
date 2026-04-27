@@ -30,7 +30,11 @@ job_description.txt  +  master_profile.xlsx  →  CV DOCX personnalisé  →  Go
 ## Résultat
 
 <div align="center">
-<img src="assets/cv_output_example.png" alt="Exemple de CV généré" width="520"/>
+
+<img src="assets/cv_output_example.png" alt="Exemple de CV généré" width="480"/>
+
+*Exemple de CV généré — [📄 Voir le PDF complet](assets/cv_output_example.pdf)*
+
 </div>
 
 ---
