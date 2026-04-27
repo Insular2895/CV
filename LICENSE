@@ -1,39 +1,29 @@
 Copyright (c) 2026 Lucas Pertusa. All rights reserved.
 
-PROPRIETARY LICENSE
+PERSONAL USE LICENSE
 
-This software and all associated files (source code, documentation, templates,
-configuration files, and any other materials) are the exclusive property of
-Lucas Pertusa.
+This software and all associated files are the exclusive property of Lucas Pertusa.
 
-The following restrictions apply to any person or entity obtaining a copy
-of this software:
+Permission is hereby granted, free of charge, to any individual person obtaining
+a copy of this software, to use it solely for their own personal, non-commercial
+purposes, subject to the following conditions:
 
-1. NO USE — You may not use this software, in whole or in part, for any
-   purpose, whether commercial or non-commercial, without prior written
-   permission from the copyright holder.
+PERMITTED
+- Running the software for your own personal job applications
+- Adapting the configuration (Excel profile, DOCX template, .env) for personal use
+- Sharing the repository link with others so they may obtain their own copy
 
-2. NO DISTRIBUTION — You may not distribute, sublicense, publish, transmit,
-   share, or make available this software or any derivative work to any
-   third party.
+NOT PERMITTED
+- Commercial use of any kind (selling, licensing, offering as a service, SaaS, etc.)
+- Redistribution or republication of the source code, in whole or in part
+- Modification and redistribution of derivative works
+- Use on behalf of a company, organization, or third party
+- Integrating this software into any commercial product or service
+- Removing or altering this license notice
 
-3. NO MODIFICATION — You may not modify, adapt, translate, reverse-engineer,
-   decompile, disassemble, or create derivative works based on this software.
+DISCLAIMER
+This software is provided "as is", without warranty of any kind, express or implied.
+The author shall not be liable for any claim, damages, or other liability arising
+from the use of this software.
 
-4. NO COMMERCIAL USE — You may not sell, rent, lease, or otherwise exploit
-   this software or any part of it for commercial purposes.
-
-5. NO COPYING — You may not copy or reproduce this software except for the
-   sole purpose of viewing it on the platform where it is publicly hosted
-   (e.g. GitHub).
-
-Any use, distribution, modification, or sale of this software without explicit
-prior written authorization from the copyright holder constitutes a violation
-of this license and may result in legal action.
-
-For permission requests, contact: lpertusa2895@gmail.com
-
-THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM,
-DAMAGES OR OTHER LIABILITY ARISING FROM THE USE OR INABILITY TO USE THIS
-SOFTWARE.
+For any other use case, contact: lpertusa2895@gmail.com

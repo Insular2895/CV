@@ -1,13 +1,13 @@
 <div align="center">
 
-# ⚡ CV Tailor
+# ⚡ ResumeForge
 
 **Génère automatiquement un CV DOCX ciblé à partir d'une offre d'emploi**
 
 [![Python](https://img.shields.io/badge/Python-3.9+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![Gemini](https://img.shields.io/badge/Gemini-AI-4285F4?style=flat-square&logo=google&logoColor=white)](https://aistudio.google.com)
 [![Google Sheets](https://img.shields.io/badge/Google_Sheets-Tracker-34A853?style=flat-square&logo=googlesheets&logoColor=white)](https://sheets.google.com)
-[![License](https://img.shields.io/badge/License-Proprietary-red?style=flat-square)](LICENSE)
+[![License](https://img.shields.io/badge/License-Personal_Use_Only-orange?style=flat-square)](LICENSE)
 
 </div>
 
@@ -172,7 +172,7 @@ Le principe est le même pour n'importe quelle section : **une balise dans le Wo
 ## Installation
 
 ```bash
-git clone https://github.com/Insular2895/CV.git
+git clone https://github.com/Insular2895/ResumeForge.git
 cd CV
 python3 -m venv .venv
 source .venv/bin/activate      # Windows : .venv\Scripts\activate
