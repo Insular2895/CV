@@ -27,6 +27,14 @@ job_description.txt  +  master_profile.xlsx  →  CV DOCX personnalisé  →  Go
 
 ---
 
+## Résultat
+
+<div align="center">
+<img src="assets/cv_output_example.png" alt="Exemple de CV généré" width="520"/>
+</div>
+
+---
+
 ## Fonctionnalités
 
 | | |
@@ -36,6 +44,68 @@ job_description.txt  +  master_profile.xlsx  →  CV DOCX personnalisé  →  Go
 | 📄 **Template DOCX** | Mise en page Word personnalisable via placeholders |
 | 📊 **Tracker Google Sheets** | Suivi automatique de chaque candidature |
 | 🔒 **Zéro donnée en ligne** | Tout tourne en local, tes données restent chez toi |
+
+---
+
+## Pourquoi Gemini ?
+
+L'API Gemini de Google propose un **niveau gratuit généreux** (sans carte bancaire requise pour démarrer), ce qui en fait le choix évident pour un usage personnel et intensif.
+
+> ✅ Gemini 2.5 Flash Lite — gratuit, rapide, suffisant pour 95% des cas
+> ✅ Gemini 2.5 Flash — gratuit avec limites quotidiennes
+> ✅ Gemini 2.5 Flash Preview — accès gratuit en preview
+
+**Tu préfères une autre API ?** Aucun problème. Le système est conçu pour être modulaire : il suffit de remplacer la fonction `ask_gemini()` dans `src/llm/gemini_client.py` par n'importe quel autre client LLM (OpenAI, Mistral, Claude, Ollama en local...). Le reste du code ne change pas.
+
+---
+
+## Personnaliser le template CV
+
+Le script injecte des données dans un fichier Word (`templates/base_cv.docx`) via des **placeholders** — des balises entre doubles crochets que Word ne voit pas comme du code, mais que le script reconnaît et remplace.
+
+### Placeholders standards
+
+| Placeholder | Contenu injecté |
+|---|---|
+| `[[EXP_1_COMPANY]]` | Entreprise — expérience 1 |
+| `[[EXP_1_POSITION_TITLE]]` | Poste — expérience 1 |
+| `[[EXP_1_LOCATION]]` | Lieu — expérience 1 |
+| `[[EXP_1_DATES]]` | Dates — expérience 1 |
+| `[[EXP_1_BULLETS]]` | Bullets — expérience 1 *(bloc multi-lignes)* |
+| `[[EXP_2_COMPANY]]` | Entreprise — expérience 2 |
+| `[[EXP_2_POSITION_TITLE]]` | Poste — expérience 2 |
+| `[[EXP_2_LOCATION]]` | Lieu — expérience 2 |
+| `[[EXP_2_DATES]]` | Dates — expérience 2 |
+| `[[EXP_2_BULLETS]]` | Bullets — expérience 2 *(bloc multi-lignes)* |
+| `[[LEAD_1_ORG]]` | Organisation — leadership |
+| `[[LEAD_1_ROLE]]` | Rôle — leadership |
+| `[[LEAD_1_LOCATION]]` | Lieu — leadership |
+| `[[LEAD_1_DATES]]` | Dates — leadership |
+| `[[LEAD_1_BULLETS]]` | Bullets — leadership *(bloc multi-lignes)* |
+| `[[TECHNICAL_SKILLS]]` | Compétences techniques |
+| `[[CERTIFICATION_ENTRIES]]` | Certifications |
+
+### Ajouter tes propres sections
+
+Tu peux **remplacer n'importe quelle section** par un placeholder personnalisé et alimenter sa valeur dans `build_replacements()` dans `src/generate_cv.py`.
+
+**Exemple concret** : remplacer la section Leadership par un accroche personnalisée selon l'offre
+
+Dans ton `.docx`, tu écris à l'endroit voulu :
+
+```
+[[RESUME_ANNONCE]]
+```
+
+Dans `generate_cv.py`, tu ajoutes dans `build_replacements()` :
+
+```python
+"[[RESUME_ANNONCE]]": "Passionné par les opérations supply chain internationales, "
+                      "je candidate chez {company} pour contribuer à {job_title}."
+```
+
+Ou tu génères ce texte dynamiquement avec Gemini avant de construire les remplacements.  
+Le principe est le même pour n'importe quelle section : **une balise dans le Word = une clé dans le dict Python**.
 
 ---
 
@@ -59,15 +129,13 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Ouvre `.env` et remplis tes clés (voir les sections Gemini et Google Sheets ci-dessous).
-
 ---
 
 ### 2 — Clé API Gemini *(optionnel)*
 
-> Passe cette étape et mets `USE_GEMINI=false` dans `.env` si tu ne veux pas utiliser Gemini.
+> Mets `USE_GEMINI=false` dans `.env` pour désactiver complètement.
 
-1. Aller sur **[Google AI Studio](https://aistudio.google.com/app/apikey)** → Créer une clé API
+1. Aller sur **[Google AI Studio](https://aistudio.google.com/app/apikey)** → Créer une clé API (gratuit)
 2. Copier la clé dans `.env` :
 
 ```env
@@ -75,20 +143,20 @@ USE_GEMINI=true
 GEMINI_API_KEY=AIzaSy...
 ```
 
-Le système tourne automatiquement entre 3 modèles Gemini (60 CV optimisés/jour par défaut).
+Le système tourne automatiquement entre 3 modèles (60 CV optimisés/jour par défaut).
 
 ---
 
 ### 3 — Google Sheets + Service Account *(optionnel)*
 
-> Passe cette étape si tu ne veux pas de suivi Google Sheets. Lance juste `python3 -m src.generate_cv` à la place de `run.py`.
+> Utilise `python3 -m src.generate_cv` à la place de `run.py` pour passer cette étape.
 
 <details>
 <summary><b>Voir les étapes détaillées</b></summary>
 
 #### 3a — Créer le Google Sheet
 
-1. Aller sur [Google Sheets](https://sheets.google.com) et créer un nouveau fichier
+1. Aller sur [Google Sheets](https://sheets.google.com) → créer un nouveau fichier
 2. Récupérer l'**ID du Sheet** dans l'URL :
 
 ```
@@ -124,7 +192,7 @@ mv ~/Downloads/ton-fichier.json credentials/service_account.json
 #### 3d — Partager le Sheet avec le Service Account
 
 1. Ouvrir `credentials/service_account.json`
-2. Copier la valeur du champ `"client_email"` → ressemble à `cv-tailor@projet.iam.gserviceaccount.com`
+2. Copier la valeur du champ `"client_email"` → ex. `cv-tailor@projet.iam.gserviceaccount.com`
 3. Dans Google Sheets → **Partager** → coller cet email → **Éditeur** → **Envoyer**
 
 </details>
@@ -136,8 +204,6 @@ mv ~/Downloads/ton-fichier.json credentials/service_account.json
 ```bash
 cp data/reference/master_profile_example.xlsx data/reference/master_profile.xlsx
 ```
-
-Ouvrir `master_profile.xlsx` et remplir les feuilles :
 
 <details>
 <summary><b>Voir la structure complète des feuilles</b></summary>
@@ -158,7 +224,7 @@ Ouvrir `master_profile.xlsx` et remplir les feuilles :
 | `tools_verified` | Outils maîtrisés (ex. `SAP EWM, Excel`) |
 | `skills_verified` | Compétences prouvées |
 | `skills_transferable` | Compétences transférables |
-| `skills_exposed` | Compétences exposées (sans expertise confirmée) |
+| `skills_exposed` | Compétences exposées |
 | `kpis_verified` | KPIs réels (ex. `réduction 20% des délais`) |
 | `cv_priority` | Priorité d'affichage (`1` = prioritaire) |
 
@@ -200,43 +266,17 @@ Ouvrir `master_profile.xlsx` et remplir les feuilles :
 cp templates/base_cv_example.docx templates/base_cv.docx
 ```
 
-Ouvrir `base_cv.docx` dans Word et personnaliser (nom, contact, couleurs, polices...).  
-Les placeholders sont remplacés automatiquement à la génération.
-
-<details>
-<summary><b>Liste complète des placeholders</b></summary>
-
-| Placeholder | Contenu injecté |
-|---|---|
-| `[[EXP_1_COMPANY]]` | Entreprise — expérience 1 |
-| `[[EXP_1_POSITION_TITLE]]` | Poste — expérience 1 |
-| `[[EXP_1_LOCATION]]` | Lieu — expérience 1 |
-| `[[EXP_1_DATES]]` | Dates — expérience 1 |
-| `[[EXP_1_BULLETS]]` | Bullets — expérience 1 |
-| `[[EXP_2_COMPANY]]` | Entreprise — expérience 2 |
-| `[[EXP_2_POSITION_TITLE]]` | Poste — expérience 2 |
-| `[[EXP_2_LOCATION]]` | Lieu — expérience 2 |
-| `[[EXP_2_DATES]]` | Dates — expérience 2 |
-| `[[EXP_2_BULLETS]]` | Bullets — expérience 2 |
-| `[[LEAD_1_ORG]]` | Organisation — leadership |
-| `[[LEAD_1_ROLE]]` | Rôle — leadership |
-| `[[LEAD_1_LOCATION]]` | Lieu — leadership |
-| `[[LEAD_1_DATES]]` | Dates — leadership |
-| `[[LEAD_1_BULLETS]]` | Bullets — leadership |
-| `[[TECHNICAL_SKILLS]]` | Compétences techniques |
-| `[[CERTIFICATION_ENTRIES]]` | Certifications |
-
-</details>
+Personnalise `base_cv.docx` dans Word (nom, contact, couleurs, polices...) en utilisant les placeholders listés dans la section [Personnaliser le template CV](#personnaliser-le-template-cv).
 
 ---
 
 ### 6 — Job Description
 
-Coller l'offre d'emploi dans :
-
 ```
 data/input/job_description.txt
 ```
+
+Coller l'offre d'emploi en texte brut.
 
 ---
 
@@ -248,13 +288,13 @@ python3 run.py
 
 > Génère le CV **et** envoie la ligne dans Google Sheets.
 
-Pour générer uniquement le CV (sans Sheets) :
-
 ```bash
 python3 -m src.generate_cv
 ```
 
-Le CV est créé dans `data/output/` avec un nom horodaté :
+> Génère le CV uniquement (sans Google Sheets).
+
+Le CV est créé dans `data/output/` :
 
 ```
 CV_Prenom_Nom_Entreprise_Poste_20260427_143022.docx
@@ -266,6 +306,8 @@ CV_Prenom_Nom_Entreprise_Poste_20260427_143022.docx
 
 ```
 cv-tailor/
+├── assets/
+│   └── cv_output_example.png            ← exemple de sortie
 ├── data/
 │   ├── input/
 │   │   └── job_description.txt          ← ton offre (non versionné)
