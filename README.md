@@ -51,11 +51,67 @@ job_description.txt  +  master_profile.xlsx  →  CV DOCX personnalisé  →  Go
 
 L'API Gemini de Google propose un **niveau gratuit généreux** (sans carte bancaire requise pour démarrer), ce qui en fait le choix évident pour un usage personnel et intensif.
 
-> ✅ Gemini 2.5 Flash Lite — gratuit, rapide, suffisant pour 95% des cas
-> ✅ Gemini 2.5 Flash — gratuit avec limites quotidiennes
-> ✅ Gemini 2.5 Flash Preview — accès gratuit en preview
+### Quotas gratuits par modèle
 
-**Tu préfères une autre API ?** Aucun problème. Le système est conçu pour être modulaire : il suffit de remplacer la fonction `ask_gemini()` dans `src/llm/gemini_client.py` par n'importe quel autre client LLM (OpenAI, Mistral, Claude, Ollama en local...). Le reste du code ne change pas.
+| Modèle | RPM | TPM | RPD |
+|---|---|---|---|
+| **Gemini 2.5 Flash Lite** | 10 req/min | 250K tokens/min | 500/jour |
+| **Gemini 2.5 Flash** | 5 req/min | 250K tokens/min | 100/jour |
+| **Gemini 2.5 Flash Preview** | 5 req/min | 250K tokens/min | 25/jour |
+
+> RPM = requêtes par minute · TPM = tokens par minute · RPD = requêtes par jour
+
+**Tu peux consulter ta consommation en temps réel** sur [Google AI Studio → Mes clés API → Voir les métriques](https://aistudio.google.com/).  
+Tu y trouves un tableau de bord complet : historique d'utilisation, pics de consommation, et suivi des limites par modèle.
+
+### Rotation automatique des modèles
+
+Le script tourne entre autant de modèles que tu en configures dans `.env` :
+
+```env
+GEMINI_ROTATION_MODELS=gemini-2.5-flash-lite,gemini-2.5-flash,gemini-2.5-flash-preview-05-20
+GEMINI_DAILY_LIMIT_PER_MODEL=20
+```
+
+**Tu veux ajouter un modèle ?** Il suffit de l'ajouter dans la liste, séparé par une virgule.  
+Le système l'intègre automatiquement dans la rotation sans aucune modification de code.
+
+Exemple avec 4 modèles configurés :
+
+```
+CV 1 → gemini-2.5-flash-lite
+CV 2 → gemini-2.5-flash
+CV 3 → gemini-2.5-flash-preview-05-20
+CV 4 → gemini-3-flash  ← nouveau modèle ajouté
+CV 5 → gemini-2.5-flash-lite  (cycle repart)
+```
+
+### Optimisation des tokens
+
+Le script est conçu pour consommer le **minimum de tokens possible** :
+
+- **1 seul appel Gemini par CV** — tout le contenu (expériences + leadership + bullets) est envoyé en une fois en JSON structuré, pas bullet par bullet
+- **Prompt compact** — les instructions sont courtes et précises, sans blabla superflu
+- **Fallback immédiat** — si Gemini échoue ou renvoie un JSON invalide, le script n'insiste pas et utilise les bullets originaux. Zéro retry, zéro appel supplémentaire
+- **Limite locale configurable** — `GEMINI_DAILY_LIMIT_PER_MODEL=20` agit côté script avant même d'appeler l'API, pour ne jamais dépasser tes quotas gratuits
+
+### Tu préfères une autre API ?
+
+Aucun problème. Il suffit de remplacer la fonction `ask_gemini()` dans [src/llm/gemini_client.py](src/llm/gemini_client.py) par n'importe quel autre client LLM :
+
+```python
+# OpenAI
+from openai import OpenAI
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+response = client.chat.completions.create(model="gpt-4o-mini", messages=[{"role": "user", "content": prompt}])
+return response.choices[0].message.content
+
+# Mistral
+# Anthropic Claude
+# Ollama (100% local, gratuit, aucune limite)
+```
+
+Le reste du code (`cv_enhancer.py`, `generate_cv.py`) ne change pas.
 
 ---
 
