@@ -3,6 +3,11 @@
 credentials/
 data/reference/master_profile.xlsx
 data/input/job_description.txt
+templates/base_cv.docx
+
+# Fichiers exemple versionnés (ne pas ignorer)
+!data/reference/master_profile_example.xlsx
+!templates/base_cv_example.docx
 
 # Fichiers générés
 data/output/
